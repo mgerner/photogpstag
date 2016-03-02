@@ -5,8 +5,8 @@
     android:versionName="1.0.1" >
 
     <uses-sdk
-        android:minSdkVersion="11"
-        android:targetSdkVersion="17" />
+        android:minSdkVersion="21"
+        android:targetSdkVersion="21" />
 
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -31,6 +31,11 @@
 
         <service android:name="ServiceLogger" >
         </service>
+        
+    <meta-data 
+       android:name="com.google.android.gms.version" 
+       android:value="@integer/google_play_services_version" /> 
+              
     </application>
 
 </manifest>

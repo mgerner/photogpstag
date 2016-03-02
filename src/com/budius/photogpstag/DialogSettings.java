@@ -37,7 +37,7 @@ public class DialogSettings extends DialogFragment implements
 	public View onCreateView(LayoutInflater inflater, ViewGroup container,
 			Bundle savedInstanceState) {
 
-		getDialog().setTitle("Update Interval");
+		getDialog().setTitle("Update interval");
 
 		View v = inflater.inflate(R.layout.settings, null);
 		txt = (TextView) v.findViewById(R.id.txt);

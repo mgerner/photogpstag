@@ -31,21 +31,22 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.budius.photogpstag.R;
 import com.budius.photogpstag.ServiceLogger.LoggerBinder;
 import com.budius.photogpstag.ServiceLogger.ServiceLoggerListener;
 import com.google.android.gms.common.ConnectionResult;
 
 public class ActivityMain extends Activity implements OnClickListener,
-		ServiceConnection, ServiceLoggerListener {
+ServiceConnection, ServiceLoggerListener {
 
 	private final static int CONNECTION_FAILURE_RESOLUTION_REQUEST = 9000;
 
-	private TextView txtStatus, txtLat, txtLng, txtAlt;
-	private Button btnStart, btnStop;
+	private TextView txtStatus;
+	private TextView txtTime1;
+	private TextView txtTime2;
+	private Button btnStart, btnStop, btnSingleLoc;
 	private Intent service;
 	private LoggerBinder mLoggerBinder;
-	private DateFormat dateFormat;
+	private DateFormat dateFormat = SimpleDateFormat.getDateTimeInstance(SimpleDateFormat.SHORT, SimpleDateFormat.MEDIUM);
 	private MenuItem menuItemSettings, menuItemSend, menuItemClear;
 
 	@Override
@@ -53,21 +54,43 @@ public class ActivityMain extends Activity implements OnClickListener,
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 
-		dateFormat = SimpleDateFormat.getTimeInstance(SimpleDateFormat.SHORT);
-
 		btnStart = (Button) findViewById(R.id.btnStart);
 		btnStop = (Button) findViewById(R.id.btnStop);
+		btnSingleLoc = (Button) findViewById(R.id.btnSingleLoc);
 		txtStatus = (TextView) findViewById(R.id.txtStatus);
-		txtLat = (TextView) findViewById(R.id.txtLat);
-		txtLng = (TextView) findViewById(R.id.txtLng);
-		txtAlt = (TextView) findViewById(R.id.txtAlt);
+		txtTime1 = (TextView) findViewById(R.id.txtTime1);
+		txtTime2 = (TextView) findViewById(R.id.txtTime2);
+
+		initLabels();
 
 		btnStart.setOnClickListener(this);
 		btnStop.setOnClickListener(this);
+		btnSingleLoc.setOnClickListener(this);
 
 		service = new Intent(this, ServiceLogger.class);
 		startService(service);
 
+	}
+
+	private void initLabels(){
+		File logFile = DialogSettings.getLogFile(ActivityMain.this);
+
+		this.txtTime1.setText("");
+		this.txtTime2.setText("");
+
+		if (!logFile.exists()){
+			return;
+		}
+
+		FileHandler h = new FileHandler(logFile);
+		ArrayList<Location> list = h.getLog();
+
+		if (list.isEmpty()){
+			return;
+		}
+
+		txtTime1.setText("Oldest location: " + dateFormat.format(new Date(list.get(0).getTime())));
+		txtTime2.setText("Most recent location: " + dateFormat.format(new Date(list.get(list.size() - 1).getTime())));
 	}
 
 	@Override
@@ -82,56 +105,44 @@ public class ActivityMain extends Activity implements OnClickListener,
 
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
+		final File logFile = DialogSettings.getLogFile(ActivityMain.this);
 
 		switch (item.getItemId()) {
+
 		case R.id.menuItemSettings:
 			DialogSettings d = new DialogSettings();
 			d.show(getFragmentManager(), DialogSettings.TAG);
 			return true;
+
 		case R.id.menuItemSend:
 			final File export = new File(
 					Environment.getExternalStorageDirectory(),
 					"Android/data/com.budius.photogpstag/export"
 							+ Long.toString(System.currentTimeMillis())
 							+ ".gpx");
+
 			new AsyncTask<Void, Void, Integer>() {
 				private String excMsg = null;
 
 				@Override
 				protected Integer doInBackground(Void... params) {
-					File logFile = DialogSettings.getLogFile(ActivityMain.this);
 					if (!logFile.exists())
 						return 1;
-					FileHandler h = new FileHandler(logFile);
-					ArrayList<Location> list = h.getLog();
+
+					ArrayList<Location> locations = new FileHandler(logFile).getLog();
+
 					export.mkdirs();
+					if (export.exists())
+						export.delete();
 
-					GpxTrackWriter gpx = new GpxTrackWriter();
 					try {
-						if (export.exists())
-							export.delete();
-						gpx.prepare(export);
-						gpx.writeHeader();
-						gpx.writeBeginTrack();
-						gpx.writeOpenSegment();
-
-						for (Location l : list)
-							gpx.writeLocation(l);
-
-						gpx.writeCloseSegment();
-						gpx.writeEndTrack();
-						gpx.writeFooter();
-						gpx.close();
-
-						logFile.delete();
-
+						GpxTrackWriter.write(export, locations);
+						return 0;
 					} catch (IOException e) {
 						excMsg = e.getMessage();
 						Log.e("Budius", "IOException. " + excMsg);
 						return 2;
 					}
-
-					return 0;
 				}
 
 				protected void onPostExecute(Integer result) {
@@ -145,15 +156,30 @@ public class ActivityMain extends Activity implements OnClickListener,
 						Uri uri = Uri.fromFile(export);
 						intent.putExtra(Intent.EXTRA_STREAM, uri);
 						startActivity(Intent.createChooser(intent,
-								"Send email..."));
-						break;
+								"Export GPX file"));
+						
+						//TODO: it'd be nice if this was done synchronously after the export
+						new AlertDialog.Builder(ActivityMain.this).setTitle("Clear log?").setMessage("Would you also like to clear the log?").
+						setCancelable(false).setNegativeButton("No", null).setPositiveButton("Yes", new DialogInterface.OnClickListener(){
+							@Override
+							public void onClick(DialogInterface dialog, int which) {
+								if (logFile.exists())
+									logFile.delete();
+
+								initLabels();
+							}}).show();
+						
+						return;
+						
 					case 1:
 						if (export.exists())
 							export.delete();
 						Toast.makeText(ActivityMain.this,
 								"There's nothing to export", Toast.LENGTH_SHORT)
 								.show();
-						break;
+
+						return;
+						
 					case 2:
 						if (export.exists())
 							export.delete();
@@ -165,18 +191,32 @@ public class ActivityMain extends Activity implements OnClickListener,
 						}
 						Toast.makeText(ActivityMain.this, sb.toString(),
 								Toast.LENGTH_SHORT).show();
-						break;
+
+						return;
 
 					}
 				};
 
 			}.execute(new Void[] {});
 			return true;
+
 		case R.id.menuItemClear:
-			File logFile = DialogSettings.getLogFile(this);
-			if (logFile.exists())
-				logFile.delete();
-			return true;
+			if (!logFile.exists()){
+				return true;
+			} else {
+				new AlertDialog.Builder(this).setTitle("Confirmation").setMessage("Are you certain that you want to clear the location log?").
+				setCancelable(false).setNegativeButton("No", null).setPositiveButton("Yes", new DialogInterface.OnClickListener(){
+					@Override
+					public void onClick(DialogInterface dialog, int which) {
+						if (logFile.exists())
+							logFile.delete();
+
+						initLabels();
+					}}).show();
+
+				return true;
+			}
+
 		default:
 			return super.onOptionsItemSelected(item);
 		}
@@ -211,35 +251,47 @@ public class ActivityMain extends Activity implements OnClickListener,
 		}
 	}
 
+	private void checkLocationEnabled(){
+		LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+		if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+			AlertDialog.Builder b = new AlertDialog.Builder(this);
+			b.setTitle("Reminder:")
+			.setMessage(
+					"This app works better with GPS turned on.\n"
+							+ "We've detected that yours is currently turned off.\n"
+							+ "Please go to Settings -> Location Access and enable your GPS")
+							.setNeutralButton("OK",
+									new DialogInterface.OnClickListener() {
+
+								@Override
+								public void onClick(DialogInterface dialog,
+										int which) {
+									dialog.dismiss();
+								}
+							}).setCancelable(true).show();
+		}
+
+	}
+
 	@Override
 	public void onClick(View v) {
 		switch (v.getId()) {
 		case R.id.btnStart:
 			Log.i("Budius", "Activity trying to start log");
 			mLoggerBinder.startLogging();
-			LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
-			if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-				AlertDialog.Builder b = new AlertDialog.Builder(this);
-				b.setTitle("Reminder:")
-						.setMessage(
-								"This app works better with GPS turned on.\n"
-										+ "We've detected that yours is currently turned off.\n"
-										+ "Please go to Settings -> Location Access and enable your GPS")
-						.setNeutralButton("OK",
-								new DialogInterface.OnClickListener() {
-
-									@Override
-									public void onClick(DialogInterface dialog,
-											int which) {
-										dialog.dismiss();
-									}
-								}).setCancelable(true).show();
-			}
+			checkLocationEnabled();
 			break;
 		case R.id.btnStop:
 			Log.i("Budius", "Activity trying to stop log");
 			mLoggerBinder.stopLogging();
 			break;
+		case R.id.btnSingleLoc:
+			Log.i("Budis", "Activity trying to acquire a single location");
+			mLoggerBinder.doSingleLocation();
+			checkLocationEnabled();
+			break;
+		default:
+			Log.e("Budius", "onClick called with unknown button: "  + v.getId());
 		}
 	}
 
@@ -247,6 +299,7 @@ public class ActivityMain extends Activity implements OnClickListener,
 	public void onServiceConnected(ComponentName name, IBinder service) {
 		Log.i("Budius", "Activity connected to service");
 		btnStart.setEnabled(true);
+		btnSingleLoc.setEnabled(true);
 		btnStop.setEnabled(false);
 		if (menuItemSettings != null)
 			menuItemSettings.setEnabled(true);
@@ -266,6 +319,7 @@ public class ActivityMain extends Activity implements OnClickListener,
 		mLoggerBinder = null;
 		btnStart.setEnabled(false);
 		btnStop.setEnabled(false);
+		btnSingleLoc.setEnabled(false);
 		if (menuItemSettings != null)
 			menuItemSettings.setEnabled(true);
 		if (menuItemSend != null)
@@ -301,6 +355,7 @@ public class ActivityMain extends Activity implements OnClickListener,
 			updateTextStatus("Can't connect to Google Play Services. Stuff won't work!");
 			btnStart.setEnabled(false);
 			btnStop.setEnabled(false);
+			btnSingleLoc.setEnabled(false);
 			if (menuItemSettings != null)
 				menuItemSettings.setEnabled(true);
 			if (menuItemSend != null)
@@ -308,7 +363,6 @@ public class ActivityMain extends Activity implements OnClickListener,
 			if (menuItemClear != null)
 				menuItemClear.setEnabled(true);
 		}
-
 	}
 
 	@Override
@@ -317,6 +371,7 @@ public class ActivityMain extends Activity implements OnClickListener,
 		case ServiceLogger.STS_CONNECTING_TO_GOOGLE_PLAY:
 			btnStart.setEnabled(false);
 			btnStop.setEnabled(false);
+			btnSingleLoc.setEnabled(false);
 			if (menuItemSettings != null)
 				menuItemSettings.setEnabled(false);
 			if (menuItemSend != null)
@@ -327,6 +382,7 @@ public class ActivityMain extends Activity implements OnClickListener,
 			break;
 		case ServiceLogger.STS_CONNECTED_TO_GOOGLE_PLAY:
 			btnStart.setEnabled(false);
+			btnSingleLoc.setEnabled(false);
 			btnStop.setEnabled(true);
 			if (menuItemSettings != null)
 				menuItemSettings.setEnabled(false);
@@ -338,6 +394,7 @@ public class ActivityMain extends Activity implements OnClickListener,
 			break;
 		case ServiceLogger.STS_DISCONNECTED_FROM_GOOGLE_PLAY:
 			btnStart.setEnabled(true);
+			btnSingleLoc.setEnabled(true);
 			btnStop.setEnabled(false);
 			if (menuItemSettings != null)
 				menuItemSettings.setEnabled(true);
@@ -350,6 +407,7 @@ public class ActivityMain extends Activity implements OnClickListener,
 		case ServiceLogger.STS_FAIL_TO_CONNECT_TO_GOOGLE_PLAY:
 			btnStart.setEnabled(false);
 			btnStop.setEnabled(false);
+			btnSingleLoc.setEnabled(false);
 			if (menuItemSettings != null)
 				menuItemSettings.setEnabled(true);
 			if (menuItemSend != null)
@@ -363,11 +421,13 @@ public class ActivityMain extends Activity implements OnClickListener,
 
 	@Override
 	public void newLocation(Location location) {
-		txtStatus.setText("Status: receiving... "
-				+ dateFormat.format(new Date(location.getTime())));
-		txtLat.setText("Lat: " + Double.toString(location.getLatitude()));
-		txtLng.setText("Lng: " + Double.toString(location.getLongitude()));
-		txtAlt.setText("Alt: " + Double.toString(location.getAltitude()));
+		txtStatus.setText("Status: receiving...");
+
+		if (txtTime1.length() == 0){
+			txtTime1.setText("Oldest location: " + dateFormat.format(new Date(location.getTime())));
+		}
+
+		txtTime2.setText("Most recent location: " + dateFormat.format(new Date(location.getTime())));
 	}
 
 	private void updateTextStatus(String status) {

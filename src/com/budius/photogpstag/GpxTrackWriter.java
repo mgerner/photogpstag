@@ -1,10 +1,12 @@
 package com.budius.photogpstag;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.TimeZone;
 
@@ -37,10 +39,7 @@ public class GpxTrackWriter {
 
 	private PrintWriter printWriter;
 
-	public GpxTrackWriter() {
-	}
-
-	public void prepare(File file) throws IOException {
+	public GpxTrackWriter(File file) throws FileNotFoundException {
 		this.printWriter = new PrintWriter(file);
 	}
 
@@ -149,6 +148,23 @@ public class GpxTrackWriter {
 	 */
 	public static String formatDateTimeIso8601(long time) {
 		return ISO_8601_DATE_TIME_FORMAT.format(time);
+	}
+
+	public static void write(File file, ArrayList<Location> locations) throws FileNotFoundException {
+		GpxTrackWriter gpx = new GpxTrackWriter(file);
+		
+		gpx.writeHeader();
+		gpx.writeBeginTrack();
+		gpx.writeOpenSegment();
+
+		for (Location l : locations)
+			gpx.writeLocation(l);
+
+		gpx.writeCloseSegment();
+		gpx.writeEndTrack();
+		gpx.writeFooter();
+		gpx.close();
+		
 	}
 
 }

@@ -13,13 +13,14 @@ import android.util.Log;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesClient;
-import com.google.android.gms.location.LocationClient;
+import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationServices;
 
 public class ServiceLogger extends Service implements
-		GooglePlayServicesClient.ConnectionCallbacks,
-		GooglePlayServicesClient.OnConnectionFailedListener, LocationListener {
+		GoogleApiClient.ConnectionCallbacks,
+		GoogleApiClient.OnConnectionFailedListener, LocationListener {
 
 	private static final int ID = 66642;
 
@@ -30,14 +31,17 @@ public class ServiceLogger extends Service implements
 	public static final int STS_FAIL_TO_CONNECT_TO_GOOGLE_PLAY = 4;
 
 	private LocationRequest mLocationRequest;
-	private LocationClient mLocationClient;
+//	private LocationClient mLocationClient;
 	private LoggerBinder mLoggerBinder;
 	private ServiceLoggerListener listener;
 	private Location lastLocation;
 	private int status = STS_NONE;
+	private boolean disconnectAfterLocation=false;
 
 	private FileHandler mFileHandler;
 
+	private GoogleApiClient mGoogleApiClient = null;
+	
 	/*-
 	 * Service stuff 
 	 * ================================================
@@ -59,13 +63,21 @@ public class ServiceLogger extends Service implements
 			mLocationRequest.setInterval(interval * 1000);
 			mLocationRequest
 					.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+			
+			
 
 		}
 
-		if (mLocationClient == null) {
-			mLocationClient = new LocationClient(this, this, this);
-		}
+//		if (mLocationClient == null) {
+//			mLocationClient = new LocationClient(this, this, this);
+//		}
 
+		if (mGoogleApiClient == null){
+			mGoogleApiClient = new GoogleApiClient.Builder(this).addConnectionCallbacks(this).
+					addOnConnectionFailedListener(this).addApi(LocationServices.API).build();
+			
+		}
+		
 		if (mFileHandler == null) {
 			mFileHandler = new FileHandler(DialogSettings.getLogFile(this));
 		}
@@ -98,8 +110,13 @@ public class ServiceLogger extends Service implements
 		super.onDestroy();
 		Log.i("Budius", "Service. onDestroy");
 		try {
-			mLocationClient.removeLocationUpdates(this);
-			mLocationClient.disconnect();
+			
+			LocationServices.FusedLocationApi.removeLocationUpdates(mGoogleApiClient, this);
+			mGoogleApiClient.disconnect();
+			
+			
+//			mLocationClient.removeLocationUpdates(this);
+//			mLocationClient.disconnect();
 		} catch (Exception e) {
 			Log.e("Budius", e.getMessage());
 		}
@@ -134,15 +151,17 @@ public class ServiceLogger extends Service implements
 		Log.i("Budius", "Starting foreground");
 		startForeground(ID, getNotification());
 		setNewStatus(STS_CONNECTED_TO_GOOGLE_PLAY);
-		mLocationClient.requestLocationUpdates(mLocationRequest, this);
+//		mLocationClient.requestLocationUpdates(mLocationRequest, this);
+		
+		LocationServices.FusedLocationApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, this);
 	}
 
-	@Override
-	public void onDisconnected() {
-		Log.i("Budius", "Stoping foreground");
-		stopForeground(true);
-		setNewStatus(STS_DISCONNECTED_FROM_GOOGLE_PLAY);
-	}
+//	@Override
+//	public void onDisconnected() {
+//		Log.i("Budius", "Stoping foreground");
+//		stopForeground(true);
+//		setNewStatus(STS_DISCONNECTED_FROM_GOOGLE_PLAY);
+//	}
 
 	/*-
 	 * LocationListener stuff
@@ -160,6 +179,11 @@ public class ServiceLogger extends Service implements
 
 		if (listener != null)
 			listener.newLocation(location);
+		
+		if (disconnectAfterLocation){
+			disconnectAfterLocation=false;
+			mLoggerBinder.stopLogging();
+		}
 	}
 
 	public class LoggerBinder extends Binder {
@@ -174,15 +198,24 @@ public class ServiceLogger extends Service implements
 		}
 
 		public void startLogging() {
+			disconnectAfterLocation=false;
 			setNewStatus(STS_CONNECTING_TO_GOOGLE_PLAY);
-			mLocationClient.connect();
+			mGoogleApiClient.connect();
+//			mLocationClient.connect();
 		};
 
 		public void stopLogging() {
 			setNewStatus(STS_DISCONNECTED_FROM_GOOGLE_PLAY);
-			mLocationClient.disconnect();
-			Log.i("Budius", "Stoping foreground");
+//			mLocationClient.disconnect();
+			mGoogleApiClient.disconnect();
+			Log.i("Budius", "Stopping foreground");
 			stopForeground(true);
+		}
+
+		public void doSingleLocation() {
+			disconnectAfterLocation=true;
+			setNewStatus(STS_CONNECTING_TO_GOOGLE_PLAY);
+			mGoogleApiClient.connect();
 		};
 	}
 
@@ -237,5 +270,12 @@ public class ServiceLogger extends Service implements
 		sb.append("; Lng: ");
 		sb.append(lastLocation.getLongitude());
 		mn.notify(ID, getNotification(sb.toString(), lastLocation.getTime()));
+	}
+
+	@Override
+	public void onConnectionSuspended(int arg0) {
+		Log.i("Budius", "Stopping foreground");
+		stopForeground(true);
+		setNewStatus(STS_DISCONNECTED_FROM_GOOGLE_PLAY);
 	}
 }
